@@ -2,9 +2,6 @@
 
 ![X-MAS](./assets/xmas_overview.png)
 
-## 🔥 News
-- [2025/05/23] See our preprint paper in [ArXiv](https://arxiv.org/pdf/2505.16997).
-
 ## X-MAS-Bench
 
 1. Specify your model configs in `./configs/X-MAS_Bench_config.json`:
@@ -60,15 +57,4 @@ python X-MAS-Design/inference_X-MAS.py --method_name <method_name> --model_name 
 3. Evaluate on a dataset (the outputs will be saved under "./X-MAS-Design/results/")
 ```
 bash scripts/eval_X-MAS_Design.sh
-```
-
-## Citation
-
-```
-@article{ye2025x,
-  title={X-MAS: Towards Building Multi-Agent Systems with Heterogeneous LLMs},
-  author={Ye, Rui and Liu, Xiangrui and Wu, Qimin and Pang, Xianghe and Yin, Zhenfei and Bai, Lei and Chen, Siheng},
-  journal={arXiv preprint arXiv:2505.16997},
-  year={2025}
-}
 ```
