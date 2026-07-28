@@ -33,8 +33,6 @@ Edit a private copy of `configs/X-MAS_Bench_config.json` or `configs/X-MAS_Desig
 
 For X-MAS-Design, add every model alias referenced by the selected method YAML. For example, `config_reasoner.yaml` references `deepseek-r1-distill-qwen-32b`, while the default configs reference `qwen-2.5-32b-instruct`. The role YAML chooses model aliases; the JSON config supplies their endpoint lists and credentials. Do not commit credentials or private endpoint URLs.
 
-The config loader also accepts `${ENV_VAR}` placeholders when a private config needs environment-based secret injection, but this is optional and does not replace the multi-model configuration.
-
 To validate a dataset/config selection without making an API request:
 
 ```bash
@@ -62,8 +60,6 @@ python X-MAS-Bench/infer_direct.py \
   --output_path /tmp/xmas_direct_one.jsonl
 ```
 
-Each inference row preserves the raw response, final response, separate reasoning field when provided, finish reason, token usage, protocol metadata, and call history. These fields make the execution path auditable; they do not change the end-to-end MAS scoring definition.
-
 ## 4. Run a MAS method
 
 The method YAML selects role-wise model aliases, while the JSON config supplies the corresponding model endpoints. For example, after adding `deepseek-r1-distill-qwen-32b` to a private Design config:
@@ -82,13 +78,9 @@ python X-MAS-Design/inference_mas.py \
   --output_path /tmp/xmas_mas_one.jsonl
 ```
 
-The repaired entry point uses the actual file name `inference_mas.py`, accepts sequential execution, and writes explicit call history and status fields. This command is an executable path check, not a replacement for the paper's full Table 3.
-
 ## Full experiments and released results
 
 The original X-MAS-Bench result archive is available from the anonymous Google Drive link supplied with the submission: <https://drive.google.com/file/d/1oukYZLDOuc98i-ICkoZ6OYME9a7-AuH1/view?usp=drive_link>. Place extracted result/dataset folders under the paths expected by the original scripts. The paper's Appendix E specifies the role-to-model configurations for the heterogeneous MAS settings; the YAML/JSON configuration format here provides the corresponding runnable model-alias and endpoint path.
-
-The general evaluator remains the original task-aware evaluator: it uses deterministic/execution-based paths for supported code and structured tasks and an OpenAI-compatible LLM judge for the generic open-ended path. The repair keeps that evaluation design; it does not replace the paper evaluator with a new deterministic benchmark.
 
 ## Repository layout
 
@@ -101,8 +93,4 @@ X-MAS-Design/benchmarks/ benchmark JSON files for MAS runs
 scripts/                 evaluation and shell entry points
 ```
 
-## Known scope
-
-- The one-item commands verify installation, configuration, and an executable path; they are not statistical experiments.
-- The one-item commands validate installation and execution paths; use the Appendix E role mappings and the released result archive when reproducing the paper tables.
-- Keep credentials and private model URLs outside committed files.
+The one-item commands verify installation, configuration, and an executable path; use the Appendix E role mappings and the released result archive when reproducing the paper tables. Keep credentials and private model URLs outside committed files.
