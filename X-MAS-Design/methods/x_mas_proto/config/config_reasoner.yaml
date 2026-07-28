@@ -1,0 +1,10 @@
+cnt_d_agents: 3
+cnt_e_agents: 1
+max_revise_rounds: 3
+model_names:
+  - "deepseek-r1-distill-qwen-32b"
+  - "deepseek-r1-distill-qwen-32b"
+  - "deepseek-r1-distill-qwen-32b"
+  - "deepseek-r1-distill-qwen-32b"
+  - "deepseek-r1-distill-qwen-32b"
+

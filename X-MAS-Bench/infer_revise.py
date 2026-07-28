@@ -44,7 +44,7 @@ def revise_init_answers(query, answer):
 def get_sample_pool(test_dataset_name):
     # query_dict = defaultdict(dict)
     sample_pool = []
-    with open(f"X-MAS-Bench/results/{test_dataset_name}/qwen2.5-32b-instruct/direct/qwen2.5-32b-instruct_direct.jsonl", "r") as f:
+    with open(f"X-MAS-Bench/results/{test_dataset_name}/{args.model_name}_direct.jsonl", "r") as f:
         for i, line in enumerate(f):
             sample = json.loads(line)
             query = sample["query"]
@@ -151,4 +151,5 @@ try:
             for _ in tqdm(executor.map(process_sample, sample_pool), total=len(sample_pool), desc=f"Processing revise queries with {args.model_name} on {test_dataset_name}"):
                 pass
 except Exception as e:
-    print(f"revise Traceback: {traceback.format_exc()}")
+    print(f"revise Traceback: {traceback.format_exc()}", file=sys.stderr)
+    raise

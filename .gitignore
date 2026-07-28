@@ -1,0 +1,6 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+X-MAS-Bench/results/
+X-MAS-Design/results/

@@ -1,119 +1,109 @@
-import os
-import json
-import concurrent.futures
-import logging
-from tqdm import tqdm
-import traceback
-import sys
-
 import argparse
-parser = argparse.ArgumentParser()
-parser.add_argument("--model_name", type=str, default="llama-3-70b-instruct", help="The agent backend to be used for inference.")
-parser.add_argument("--model_temperature", type=float, default=0.5, help="Temperature for sampling.")
-parser.add_argument("--model_max_tokens", type=int, default=2048, help="Maximum tokens for sampling.")
-parser.add_argument("--model_timeout", type=int, default=600, help="Timeout for sampling.")
-parser.add_argument("--model_config", type=str, default="./configs/X-MAS_Bench_config.json")
-parser.add_argument("--test_dataset_name", type=str, default="MedMCQA")
-parser.add_argument("--sample_num", type=int, default=500)
-parser.add_argument("--dry_run", action="store_true")
-args = parser.parse_args()
-general_config = vars(args)
+import concurrent.futures
+import json
+import os
+import threading
+import traceback
 
+from tqdm import tqdm
+
+from config_utils import load_config
 from utils import LLM
 
-print("="*50)
-print(json.dumps(vars(args), indent=4))
 
-# # ============== parallel execution ==============
-def process_sample(sample):
-    
-    llm = LLM(general_config, model_list)
-    query = sample["query"]
-    try:
-        response = llm.call_llm(prompt = query)
-        if isinstance(response, str):
-            if "Error occurred:" in response and "Error code: 400" in response:
-                with open(output_json, "a") as result_file:
-                    sample["generated_output"] = response
-                    sample["num_prompt_tokens"] = 0
-                    sample["num_completion_tokens"] = 0
-                    json.dump(sample, result_file)
-                    result_file.write("\n")     
+def parse_args():
+    parser = argparse.ArgumentParser(description="Run direct model inference on an X-MAS-Bench dataset.")
+    parser.add_argument("--model_name", default="llama-3-70b-instruct")
+    parser.add_argument("--model_temperature", type=float, default=0.5)
+    parser.add_argument("--model_max_tokens", type=int, default=2048)
+    parser.add_argument("--model_timeout", type=int, default=600)
+    parser.add_argument("--model_config", default="./configs/X-MAS_Bench_config.json")
+    parser.add_argument("--test_dataset_name", default="MedMCQA")
+    parser.add_argument("--sample_num", type=int, default=500)
+    parser.add_argument("--output_path", default=None)
+    parser.add_argument("--sequential", action="store_true")
+    parser.add_argument("--dry_run", action="store_true", help="Validate inputs and show selected samples without calling a model.")
+    return parser.parse_args()
+
+
+def write_jsonl(lock, path, item):
+    with lock:
+        with open(path, "a", encoding="utf-8") as result_file:
+            result_file.write(json.dumps(item, ensure_ascii=True) + "\n")
+
+
+def main():
+    args = parse_args()
+    config = load_config(args.model_config)
+    if args.model_name not in config["model_dict"]:
+        raise ValueError(f"Model alias {args.model_name!r} is not present in {args.model_config}")
+
+    dataset_path = f"X-MAS-Bench/benchmarks/{args.test_dataset_name}.json"
+    with open(dataset_path, "r", encoding="utf-8") as dataset_file:
+        samples = json.load(dataset_file)
+    sample_num = 800 if args.test_dataset_name == "SciKnowEval" else args.sample_num
+    samples = samples[:sample_num] if sample_num > 0 else samples
+
+    output_path = args.output_path or f"X-MAS-Bench/results/{args.test_dataset_name}/{args.model_name}_direct.jsonl"
+    if args.dry_run:
+        print(json.dumps({"status": "validated", "dataset": dataset_path, "samples": len(samples), "output": output_path}, indent=2))
+        return 0
+
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+    processed = set()
+    if os.path.exists(output_path):
+        with open(output_path, "r", encoding="utf-8") as result_file:
+            for line in result_file:
+                item = json.loads(line)
+                if item.get("status") == "ok":
+                    processed.add(item["query"])
+    samples = [sample for sample in samples if sample["query"] not in processed]
+
+    model_entry = config["model_dict"][args.model_name]
+    model_list = model_entry["model_list"]
+    max_workers = model_entry["max_workers_per_model"] * len(model_list)
+    lock = threading.Lock()
+    failures = []
+
+    def process(sample):
+        record = sample.copy()
+        try:
+            llm = LLM(vars(args), model_list)
+            llm.call_llm(prompt=sample["query"])
+            metadata = llm.last_call_metadata
+            record.update(metadata)
+            record["generated_output"] = metadata["final_response"]
+            protocol_status = metadata["protocol_status"]
+            if protocol_status == "ok":
+                record["status"] = "ok"
+            elif protocol_status == "token_truncation":
+                record["status"] = "token_truncation"
             else:
-                print(f"{query[:20]} failed to execute:{response}") 
-        else:
-            generated_output = response.choices[0].message.content
-            if "r1" in args.model_name or "qwq" in args.model_name:
-                try:
-                    generated_output = generated_output.split("</think>")[-1].strip()
-                except:
-                    pass
-            elif "openthinker" in args.model_name:
-                try:
-                    generated_output = generated_output.split('<|begin_of_solution|>')[-1].split('<|end_of_solution|>')[0].strip()
-                except:
-                    pass
-            elif "huatuo" in args.model_name:
-                try:
-                    generated_output = generated_output.split('## Final Response')[-1].strip()
-                except:
-                    pass
-            with open(output_json, "a") as result_file:
-                sample["generated_output"] = generated_output
-                sample["num_prompt_tokens"] = response.usage.prompt_tokens
-                sample["num_completion_tokens"] = response.usage.completion_tokens
-                json.dump(sample, result_file)
-                result_file.write("\n")
-    
-    except Exception as e:
-        logging.error(f"{query[:20]} failed to execute: {e}\nTraceback:\n{traceback.format_exc()}")
+                record["status"] = "protocol_failure"
+            if record["status"] != "ok":
+                failures.append(sample["query"])
+        except Exception as exc:
+            record.update({
+                "status": "runtime_failure",
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+                "traceback": traceback.format_exc(),
+            })
+            failures.append(sample["query"])
+        write_jsonl(lock, output_path, record)
 
-# ============== main ==============
-test_dataset_name = args.test_dataset_name
-try:
-    # ================== Define the output files ==================
-    output_logging = f"X-MAS-Bench/results/{test_dataset_name}/log/{args.model_name}_direct.txt"
-    output_json = f"X-MAS-Bench/results/{test_dataset_name}/{args.model_name}_direct.jsonl"
-    test_data_path = f"X-MAS-Bench/benchmarks/{test_dataset_name}.json"
-
-    output_dir_log = os.path.dirname(output_logging)
-    output_dir_json = os.path.dirname(output_json)
-    os.makedirs(output_dir_log, exist_ok=True)
-    os.makedirs(output_dir_json, exist_ok=True)
-    logging.basicConfig(filename=output_logging, level=logging.INFO, format='%(asctime)s - %(message)s')
-
-    # ================== Load the test query pool ==================
-    if test_dataset_name == "SciKnowEval":
-        sample_num = 800
+    if args.sequential:
+        for sample in tqdm(samples, desc="Direct inference"):
+            process(sample)
     else:
-        sample_num = args.sample_num
-    with open(test_data_path, "r") as f:
-        sample_pool = json.load(f)
-    sample_pool = sample_pool[:sample_num] if sample_num > 0 else sample_pool
-    sample_pool = sample_pool[:5] if args.dry_run else sample_pool
-    print(f">> Initially: {len(sample_pool)} samples")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            list(tqdm(executor.map(process, samples), total=len(samples), desc="Direct inference"))
 
-    # ================== Load the processed queries ==================
-    processed_queries = set()
-    if os.path.exists(output_json):
-        with open(output_json, "r") as f:
-            for line in f:
-                infered_sample = json.loads(line)
-                processed_queries.add(infered_sample["query"])
-    sample_pool = [sample for sample in sample_pool if sample["query"] not in processed_queries]
-    print(f">> After filtering: {len(sample_pool)} samples with {args.model_name} on {test_dataset_name}")
+    print(json.dumps({"status": "complete", "processed": len(samples), "failures": len(failures), "output": output_path}, indent=2))
+    return 1 if failures else 0
 
-    # ================== Define the model list ==================
-    with open(args.model_config, "r") as f:
-        config = json.load(f)
-        model_dict = config["model_dict"]
 
-    model_list = model_dict[args.model_name]["model_list"]
-    max_workers = model_dict[args.model_name]["max_workers_per_model"] * len(model_list)
-
-    # Use ThreadPoolExecutor to process samples in parallel
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        for _ in tqdm(executor.map(process_sample, sample_pool), total=len(sample_pool), desc=f"Processing queries with {args.model_name} on {test_dataset_name}"):
-            pass
-except Exception as e:
-    print(f"direct Traceback: {traceback.format_exc()}")
+if __name__ == "__main__":
+    raise SystemExit(main())

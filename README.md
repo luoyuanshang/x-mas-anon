@@ -1,60 +1,108 @@
 # X-MAS: Towards Building Multi-Agent Systems with Heterogeneous LLMs
 
-![X-MAS](./assets/xmas_overview.png)
+This repository contains X-MAS-Bench (single-model capability probes) and X-MAS-Design (multi-agent methods). The commands below use the repository's existing `model_dict`/`model_list` configuration format; X-MAS-Design can therefore use multiple model aliases and endpoints in one experiment.
 
-## X-MAS-Bench
+## 1. Install
 
-1. Specify your model configs in `./configs/X-MAS_Bench_config.json`:
+Python 3.10 or 3.11 is recommended.
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m compileall -q X-MAS-Bench X-MAS-Design scripts
 ```
-"gpt-4o-mini-2024-07-18": {
-        "model_list": [
-            {"model_name": "gpt-4o-mini-2024-07-18", "model_url": "http://a.b.c.d:e/v1", "api_key": "xyz"}
-        ],
-        "max_workers_per_model": 10
+
+## 2. Configure models
+
+Edit a private copy of `configs/X-MAS_Bench_config.json` or `configs/X-MAS_Design_config.json`. Each entry keeps the original multi-model schema:
+
+```json
+{
+  "model_dict": {
+    "model-alias": {
+      "model_list": [
+        {"model_name": "served-model-name", "model_url": "https://server.example/v1", "api_key": "..."}
+      ],
+      "max_workers_per_model": 1
     }
+  }
+}
 ```
 
-2. Inference on a dataset (the outputs will be saved under "./X-MAS-Bench/results/")
-```
-# bash scripts/infer_X-MAS_Bench.sh
-python X-MAS-Bench/infer_direct.py --model_name <model_name> --model_config <config_path> --test_dataset_name <dataset_name>
+For X-MAS-Design, add every model alias referenced by the selected method YAML. For example, `config_reasoner.yaml` references `deepseek-r1-distill-qwen-32b`, while the default configs reference `qwen-2.5-32b-instruct`. The role YAML chooses model aliases; the JSON config supplies their endpoint lists and credentials. Do not commit credentials or private endpoint URLs.
+
+The config loader also accepts `${ENV_VAR}` placeholders when a private config needs environment-based secret injection, but this is optional and does not replace the multi-model configuration.
+
+To validate a dataset/config selection without making an API request:
+
+```bash
+python X-MAS-Bench/infer_direct.py \
+  --model_name qwen-2.5-32b-instruct \
+  --model_config configs/X-MAS_Bench_config.json \
+  --test_dataset_name AIME-2024 \
+  --sample_num 1 \
+  --dry_run
 ```
 
-3. Evaluate on a dataset (the outputs will be saved under "./X-MAS-Bench/results/")
-```
-# bash scripts/eval_X-MAS_Bench.sh
-python X-MAS-Bench/eval_bench.py --model_name <eval_model_name> --model_config <config_path> --dataset_name <dataset_name> --infer_name <infer_name> --eval_mode bench-test
-# We use llama-3.1-70b-instruct as <eval_model_name>
-```
+## 3. Run one direct AIME item
 
-Note that we release the experimental results of the X-MAS-Bench in [Google Drive](https://drive.google.com/file/d/1oukYZLDOuc98i-ICkoZ6OYME9a7-AuH1/view?usp=drive_link).
-You can download the .zip file named results.zip to the "./X-MAS-Bench/results/" path and unzip it.
+After filling the selected model entry in the private config:
 
-## X-MAS-Design
-
-1. Specify your model configs in `./configs/X-MAS_Design_config.json`:
-```
-"gpt-4o-mini-2024-07-18": {
-        "model_list": [
-            {"model_name": "gpt-4o-mini-2024-07-18", "model_url": "http://a.b.c.d:e/v1", "api_key": "xyz"}
-        ],
-        "max_workers_per_model": 10
-    }
+```bash
+python X-MAS-Bench/infer_direct.py \
+  --model_name qwen-2.5-32b-instruct \
+  --model_config configs/X-MAS_Bench_config.json \
+  --test_dataset_name AIME-2024 \
+  --sample_num 1 \
+  --model_max_tokens 8192 \
+  --model_temperature 0 \
+  --sequential \
+  --output_path /tmp/xmas_direct_one.jsonl
 ```
 
-2. Inference on a dataset (the outputs will be saved under "./X-MAS-Design/results/")
-```
-# bash scripts/infer_X-MAS_Design.sh
+Each inference row preserves the raw response, final response, separate reasoning field when provided, finish reason, token usage, protocol metadata, and call history. These fields make the execution path auditable; they do not change the end-to-end MAS scoring definition.
 
-# (Parallel)
-python X-MAS-Design/inference_X-MAS.py --method_name <method_name> --model_name <model_name> --test_dataset_name <test_dataset_name> --model_api_config <model_api_config>
+## 4. Run a MAS method
 
+The method YAML selects role-wise model aliases, while the JSON config supplies the corresponding model endpoints. For example, after adding `deepseek-r1-distill-qwen-32b` to a private Design config:
 
-# Or (Sequential)
-python X-MAS-Design/inference_X-MAS.py --method_name <method_name> --model_name <model_name> --test_dataset_name <test_dataset_name> --model_api_config <model_api_config> --sequential
+```bash
+python X-MAS-Design/inference_mas.py \
+  --method_name llm_debate \
+  --method_config_name config_reasoner \
+  --model_name deepseek-r1-distill-qwen-32b \
+  --model_api_config /path/to/private_X-MAS_Design_config.json \
+  --test_dataset_name AIME-2024 \
+  --sample_num 1 \
+  --model_max_tokens 8192 \
+  --model_temperature 0 \
+  --sequential \
+  --output_path /tmp/xmas_mas_one.jsonl
 ```
 
-3. Evaluate on a dataset (the outputs will be saved under "./X-MAS-Design/results/")
+The repaired entry point uses the actual file name `inference_mas.py`, accepts sequential execution, and writes explicit call history and status fields. This command is an executable path check, not a replacement for the paper's full Table 3.
+
+## Full experiments and released results
+
+The original X-MAS-Bench result archive is available from the anonymous Google Drive link supplied with the submission: <https://drive.google.com/file/d/1oukYZLDOuc98i-ICkoZ6OYME9a7-AuH1/view?usp=drive_link>. Place extracted result/dataset folders under the paths expected by the original scripts. The paper's Appendix E specifies the role-to-model configurations for the heterogeneous MAS settings; the YAML/JSON configuration format here provides the corresponding runnable model-alias and endpoint path.
+
+The general evaluator remains the original task-aware evaluator: it uses deterministic/execution-based paths for supported code and structured tasks and an OpenAI-compatible LLM judge for the generic open-ended path. The repair keeps that evaluation design; it does not replace the paper evaluator with a new deterministic benchmark.
+
+## Repository layout
+
+```text
+configs/                 model_dict/model_list endpoint aliases
+X-MAS-Bench/benchmarks/  benchmark JSON files
+X-MAS-Bench/             direct and capability-function inference/evaluation
+X-MAS-Design/methods/    LLM-Debate, DyLAN, AgentVerse, and X-MAS-Proto
+X-MAS-Design/benchmarks/ benchmark JSON files for MAS runs
+scripts/                 evaluation and shell entry points
 ```
-bash scripts/eval_X-MAS_Design.sh
-```
+
+## Known scope
+
+- The one-item commands verify installation, configuration, and an executable path; they are not statistical experiments.
+- The one-item commands validate installation and execution paths; use the Appendix E role mappings and the released result archive when reproducing the paper tables.
+- Keep credentials and private model URLs outside committed files.

@@ -24,6 +24,7 @@ class MAS():
 
         self.memory_bank = {}
         self.tools = {}
+        self.call_history = []
         
     
     def inference(self, query):
@@ -43,7 +44,6 @@ class MAS():
             raise
         # print(f"model_dict of {model_name}: {model_dict}")
         model_name, model_url, api_key = model_dict['model_name'], model_dict['model_url'], model_dict['api_key']
-        print(f"\nmodel_name: {model_name}, model_url: {model_url}, api_key: {api_key}")
         
         if messages is None:
             assert prompt is not None, "'prompt' must be provided if 'messages' is not provided."
@@ -53,7 +53,7 @@ class MAS():
                 messages = [{"role": "user", "content": prompt}]
         
         model_temperature = temperature if temperature is not None else self.model_temperature
-        model_max_tokens = 2048 if "7b" in model_name else 8192
+        model_max_tokens = self.model_max_tokens
 
         request_dict = {
             "model": model_name,
@@ -64,39 +64,52 @@ class MAS():
         if "o1" not in model_name:              # OpenAI's o1 models do not support temperature
             request_dict["temperature"] = model_temperature
         
-        print("model_name before api:", model_name)
         llm = openai.OpenAI(base_url=model_url, api_key=api_key)
         try:
             completion = llm.chat.completions.create(**request_dict)
-            response, num_prompt_tokens, num_completion_tokens = completion.choices[0].message.content, completion.usage.prompt_tokens, completion.usage.completion_tokens
-        except Exception as e:
-            # response = f"Error occurred in call_llm: {str(e)}"   
-            if isinstance(e, str):
-                print("error:", e)
-            else:
-                print("error:", e)
-                print("errorytpe:", type(e))
+            message = completion.choices[0].message
+            raw_response = message.content or ""
+            reasoning_content = getattr(message, "reasoning_content", None)
+            response = raw_response
+            num_prompt_tokens = getattr(completion.usage, "prompt_tokens", None) or 0
+            num_completion_tokens = getattr(completion.usage, "completion_tokens", None) or 0
+            finish_reason = completion.choices[0].finish_reason
         finally:
-            import os
-            llm.close()     # TODO: Check if this is necessary
-            os.environ.pop("http_proxy", None)
-            os.environ.pop("https_proxy", None)
+            llm.close()
 
-        if "r1" in model_name or "qwq" in model_name:
-            try:
+        protocol_status = "ok"
+        if finish_reason in {"length", "max_tokens"}:
+            protocol_status = "token_truncation"
+        if "r1" in model_name.lower() or "qwq" in model_name.lower():
+            if "<think>" in response and "</think>" not in response:
+                if protocol_status == "ok":
+                    protocol_status = "unclosed_think"
+            elif "</think>" in response:
                 response = response.split("</think>")[-1].strip()
-            except:
-                pass
         elif "openthinker" in model_name:
-            try:
+            if '<|begin_of_solution|>' in response and '<|end_of_solution|>' in response:
                 response = response.split('<|begin_of_solution|>')[-1].split('<|end_of_solution|>')[0].strip()
-            except:
-                pass
+            else:
+                protocol_status = "missing_solution_marker"
         elif "huatuo" in model_name:
-            try:
+            if '## Final Response' in response:
                 response = response.split('## Final Response')[-1].strip()
-            except:
-                pass
+            else:
+                protocol_status = "missing_final_response_marker"
+
+        if not response and protocol_status == "ok":
+            protocol_status = "empty_final_response"
+
+        self.call_history.append({
+            "model_name": model_name,
+            "raw_response": raw_response,
+            "reasoning_content": reasoning_content,
+            "final_response": response,
+            "finish_reason": finish_reason,
+            "protocol_status": protocol_status,
+            "num_prompt_tokens": num_prompt_tokens,
+            "num_completion_tokens": num_completion_tokens,
+        })
 
         if isinstance(response, str):       # in cases where response is None or an error message
             if model_name not in self.token_stats:
@@ -112,6 +125,9 @@ class MAS():
 
     def get_token_stats(self):
         return self.token_stats
+
+    def get_call_history(self):
+        return self.call_history
     
     def optimizing(self, val_data):
         """

@@ -1,0 +1,17 @@
+random_seed: 0
+num_agents: 4
+num_rounds: 3
+activation: "listwise"
+type: "open-ended"
+roles:
+  - "Assistant"
+  - "Assistant"
+  - "Assistant"
+  - "Assistant"
+model_names:
+  - "deepseek-r1-distill-qwen-32b"
+  - "deepseek-r1-distill-qwen-32b"
+  - "deepseek-r1-distill-qwen-32b"
+  - "deepseek-r1-distill-qwen-32b"
+  - "deepseek-r1-distill-qwen-32b"
+

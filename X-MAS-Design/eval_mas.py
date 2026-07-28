@@ -5,8 +5,11 @@ from tqdm import tqdm
 import os
 import random
 import re
-import sys
 import requests
+import contextlib
+import io
+import multiprocessing
+import shutil
 
 
 import argparse
@@ -32,7 +35,7 @@ def get_answer_prompt(task, operated_text):
     return prompt
 
 def get_eval_prompt(task, operated_text, ground_truth):
-        message_to_check = "===Problem: " + str(task) + f"\n\n===Ground truth answer: "+  str(ground_truth) + f"\n\n===Reply: {str(operated_text)}"
+        message_to_check = "===Problem: " + str(task) + "\n\n===Ground truth answer: " + str(ground_truth) + f"\n\n===Reply: {str(operated_text)}"
         
         prompt = f"""You are a helpful AI assistant. You will use your coding and language skills to verify the answer.
 You are given:
@@ -52,11 +55,10 @@ Here are the promblem, the ground truth answer and the reply:
     """
         return prompt
 
-from tenacity import retry, wait_exponential, stop_after_attempt, RetryError
+from tenacity import retry, wait_exponential, stop_after_attempt
 
 def handle_retry_error(retry_state):
-    # print('here ')
-    return None
+    raise retry_state.outcome.exception()
 
 @retry(wait=wait_exponential(multiplier=1, min=4, max=10), stop=stop_after_attempt(5), retry_error_callback=handle_retry_error)
 def call_llm(prompt, temperature, model_url_list, model_name):
@@ -696,7 +698,7 @@ def get_evaluation(eval_data, model_url_list, model_name, dataset_name, infer_na
                     print(f"Error occurred for prompt at index {idx}: {exc}")
                     print(f)
                     eval_content_list[idx] = "Error"
-                    scores[idx] = 0
+                    scores[idx] = None
     return eval_content_list, scores
 
 if __name__ == "__main__":
@@ -717,11 +719,10 @@ if __name__ == "__main__":
     # ================== Define the model list ==================
     with open(args.model_config, "r") as f:
         config = json.load(f)
-        model_dict = config["model_dict"]
-        worker_dict = config["worker_dict"]
-    model_list = model_dict[args.model_name]
-    model_url_list = [item[1] for item in model_list]
-    max_workers = worker_dict[args.model_name] * len(model_list)
+        model_entry = config["model_dict"][args.model_name]
+    model_list = model_entry["model_list"]
+    model_url_list = [item["model_url"] for item in model_list]
+    max_workers = model_entry["max_workers_per_model"] * len(model_list)
     print(f">> {len(model_url_list)} models will be used for evaluation")
 
     # ============== main ==============
@@ -747,7 +748,9 @@ if __name__ == "__main__":
 
             for line in tmp:
                 try:
-                    eval_data.append(json.loads(line))
+                    item = json.loads(line)
+                    if item.get("status", "ok") == "ok" and item.get("generated_output"):
+                        eval_data.append(item)
                 except Exception as e:
                     print(line)
                     print(f"{e}")
@@ -792,5 +795,4 @@ if __name__ == "__main__":
             with open(save_eval_path, "w") as f:
                 json.dump(existing_eval_data, f, ensure_ascii=False, indent=4)
         except Exception as e:
-            print(f"Error occurred during evaluation: {e}")
-            continue
+            raise RuntimeError(f"Error occurred during evaluation: {e}") from e

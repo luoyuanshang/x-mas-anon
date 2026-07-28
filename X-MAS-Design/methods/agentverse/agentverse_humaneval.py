@@ -3,7 +3,7 @@ import re
 from typing import List, Dict, Any, Set, Tuple
 
 from ..mas_base import MAS
-from ..utils import load_config
+from ..utils import ProtocolParseError, load_config
 from .prompt_humaneval import *
 
 class Agentverse_HumanEval(MAS):
@@ -69,7 +69,7 @@ class Agentverse_HumanEval(MAS):
             print(role_descriptions)
             return role_descriptions
         else:
-            raise ValueError(f"wrong cnt_agent, expect {self.cnt_agents} agents while we find {len(role_descriptions)} role_descriptions.")
+            raise ProtocolParseError(f"wrong cnt_agent, expect {self.cnt_agents} agents while we find {len(role_descriptions)} role_descriptions.")
 
     def group_vertical_solver_first(self, query: str, role_descriptions: List[str]):
         max_history_solver = 5
@@ -173,7 +173,7 @@ class Agentverse_HumanEval(MAS):
         if correctness_match:
             correctness = int(correctness_match.group(1))
         else:
-            raise ValueError("Correctness not found in the output text.")
+            raise ProtocolParseError("Correctness not found in the output text.")
 
         advice_match = re.search(r"Response:\s*(.+)", output, re.DOTALL)  
         if advice_match:
@@ -181,7 +181,7 @@ class Agentverse_HumanEval(MAS):
             clean_advice = re.sub(r"\n+", "\n", advice.strip())
         else:
 
-            raise ValueError("Advice not found in the output text.")
+            raise ProtocolParseError("Advice not found in the output text.")
  
         return correctness, clean_advice
     

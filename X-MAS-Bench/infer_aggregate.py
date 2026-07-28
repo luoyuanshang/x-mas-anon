@@ -175,4 +175,5 @@ try:
             for _ in tqdm(executor.map(process_sample, sample_pool), total=len(sample_pool), desc=f"Processing aggregate queries with {args.model_name} on {test_dataset_name}"):
                 pass
 except Exception as e:
-    print(f"Aggregate Traceback: {traceback.format_exc()}")
+    print(f"Aggregate Traceback: {traceback.format_exc()}", file=sys.stderr)
+    raise

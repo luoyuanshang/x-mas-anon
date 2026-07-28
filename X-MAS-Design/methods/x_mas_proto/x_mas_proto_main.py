@@ -3,7 +3,7 @@ import re
 from typing import List, Dict, Any, Set, Tuple
 
 from ..mas_base import MAS
-from ..utils import load_config
+from ..utils import ProtocolParseError, load_config
 from .prompt_main import *
 
 # Define the NEWMAS class which inherits from MAS and implements the inference method
@@ -40,11 +40,7 @@ class X_MAS_PROTO_MAIN(MAS):
         # print("\nplanner_prompt:\n", planner_prompt)
         # print("\nplanner_response:\n", planner_response)
         # Extract plans using regex
-        try:
-            plans = self.extract_plans(planner_response)
-            # print("\nplans:\n", plans)
-        except:
-            print("Extract plans Error!")
+        plans = self.extract_plans(planner_response)
         return plans
 
     def extract_plans(self, response: str):
@@ -64,7 +60,7 @@ class X_MAS_PROTO_MAIN(MAS):
             # print(plans)
             return plans
         else:
-            raise ValueError(f"wrong cnt_agent, expect {self.cnt_agents} agents while we find {len(plans)} plans.")
+            raise ProtocolParseError(f"wrong cnt_agent, expect {self.cnt_agents} agents while we find {len(plans)} plans.")
 
     def problem_solving(self, query: str, plans: List[str]):
         consensus_reached = False

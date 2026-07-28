@@ -84,7 +84,7 @@ def extract_code(text):
 from tenacity import retry, wait_exponential, stop_after_attempt, RetryError
 
 def handle_retry_error(retry_state):
-    return None
+    raise retry_state.outcome.exception()
 
 
 def save_obj_to_jsonl(query:str, response_text:str, prompt:str, save_path:str):
@@ -121,16 +121,15 @@ class LLM():
         self.model_timeout = general_config["model_timeout"]        
 
         self.model_list = model_list
-        print(f"model_list: {self.model_list}")
         model_dict = random.choice(self.model_list)
         self.model_name, self.model_url, self.api_key = model_dict['model_name'], model_dict['model_url'], model_dict['api_key']
+        self.last_call_metadata = None
 
     
     @retry(wait=wait_exponential(multiplier=1, min=4, max=10), stop=stop_after_attempt(5), retry_error_callback=handle_retry_error)
-    def call_llm(self, prompt=None, system_prompt=None, messages=None, model_name=None, temperature=0.5):
+    def call_llm(self, prompt=None, system_prompt=None, messages=None, model_name=None, temperature=None):
         model_name = model_name if model_name is not None else self.model_name
         model_url, api_key = self.model_url, self.api_key
-        print(f"\nmodel_name: {model_name}, model_url: {model_url}, api_key: {api_key}")
 
         if messages is None:
             assert prompt is not None, "'prompt' must be provided if 'messages' is not provided."
@@ -140,7 +139,7 @@ class LLM():
                 messages = [{"role": "user", "content": prompt}]
         
         model_temperature = temperature if temperature is not None else self.model_temperature
-        model_max_tokens = 2048 if "7b" in model_name else 8192
+        model_max_tokens = self.model_max_tokens
 
         request_dict = {
             "model": model_name,
@@ -152,36 +151,50 @@ class LLM():
             request_dict["temperature"] = model_temperature
             
         llm = openai.OpenAI(base_url=model_url, api_key=api_key)
-        
         try:
             completion = llm.chat.completions.create(**request_dict)
-            # response, num_prompt_tokens, num_completion_tokens = completion.choices[0].message.content, completion.usage.prompt_tokens, completion.usage.completion_tokens
-            response = completion
-        except Exception as e:
-            # response = f"Error occurred in call_llm: {str(e)}"   
-            if isinstance(e, str):
-                print("error:", e)
-            else:
-                print("error:", e)
-                print("errorytpe:", type(e))
-                
-        if "r1" in model_name or "qwq" in model_name:
-            try:
-                response.choices[0].message.content = response.choices[0].message.content.split("</think>")[-1].strip()
-            except:
-                pass
-        elif "openthinker" in model_name:
-            try:
-                response.choices[0].message.content = response.choices[0].message.content.split('<|begin_of_solution|>')[-1].split('<|end_of_solution|>')[0].strip()
-            except:
-                pass
-        elif "huatuo" in model_name:
-            try:
-                response.choices[0].message.content = response.choices[0].message.content.split('## Final Response')[-1].strip()
-            except:
-                pass
+        finally:
+            llm.close()
 
-        return response
+        message = completion.choices[0].message
+        raw_response = message.content or ""
+        reasoning_content = getattr(message, "reasoning_content", None)
+        final_response = raw_response
+        protocol_status = "ok"
+        if completion.choices[0].finish_reason in {"length", "max_tokens"}:
+            protocol_status = "token_truncation"
+        if "r1" in model_name.lower() or "qwq" in model_name.lower():
+            if "<think>" in raw_response and "</think>" not in raw_response:
+                if protocol_status == "ok":
+                    protocol_status = "unclosed_think"
+            elif "</think>" in raw_response:
+                final_response = raw_response.split("</think>")[-1].strip()
+        elif "openthinker" in model_name:
+            if '<|begin_of_solution|>' not in raw_response or '<|end_of_solution|>' not in raw_response:
+                protocol_status = "missing_solution_marker"
+            else:
+                final_response = raw_response.split('<|begin_of_solution|>')[-1].split('<|end_of_solution|>')[0].strip()
+        elif "huatuo" in model_name:
+            if '## Final Response' not in raw_response:
+                protocol_status = "missing_final_response_marker"
+            else:
+                final_response = raw_response.split('## Final Response')[-1].strip()
+
+        if not final_response and protocol_status == "ok":
+            protocol_status = "empty_final_response"
+        completion.choices[0].message.content = final_response
+        usage = completion.usage
+        self.last_call_metadata = {
+            "raw_response": raw_response,
+            "reasoning_content": reasoning_content,
+            "final_response": final_response,
+            "finish_reason": completion.choices[0].finish_reason,
+            "num_prompt_tokens": getattr(usage, "prompt_tokens", None),
+            "num_completion_tokens": getattr(usage, "completion_tokens", None),
+            "protocol_status": protocol_status,
+        }
+
+        return completion
 
 
 def execute_code(code, temp_dir="mas_workspace_1/mas_workspace_2/mas_workspace_3", timeout=10):

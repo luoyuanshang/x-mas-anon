@@ -5,8 +5,11 @@ from tqdm import tqdm
 import os
 import random
 import re
-import sys
 import requests
+import contextlib
+import io
+import multiprocessing
+import shutil
 
 
 import argparse
@@ -32,7 +35,7 @@ def get_answer_prompt(task, operated_text):
     return prompt
 
 def get_eval_prompt(task, operated_text, ground_truth):
-        message_to_check = "===Problem: " + str(task) + f"\n\n===Ground truth answer: "+  str(ground_truth) + f"\n\n===Reply: {str(operated_text)}"
+        message_to_check = "===Problem: " + str(task) + "\n\n===Ground truth answer: " + str(ground_truth) + f"\n\n===Reply: {str(operated_text)}"
         
         prompt = f"""You are a helpful AI assistant. You will use your coding and language skills to verify the answer.
 You are given:
@@ -52,15 +55,14 @@ Here are the promblem, the ground truth answer and the reply:
     """
         return prompt
 
-from tenacity import retry, wait_exponential, stop_after_attempt, RetryError
+from tenacity import retry, wait_exponential, stop_after_attempt
 
 def handle_retry_error(retry_state):
-    # print('here ')
-    return None
+    raise retry_state.outcome.exception()
 
 @retry(wait=wait_exponential(multiplier=1, min=4, max=10), stop=stop_after_attempt(5), retry_error_callback=handle_retry_error)
 def call_llm(prompt, temperature, model_url_list, model_name):
-    print(f"model_name: {model_name}, model_url_list: {model_url_list}")
+    print(f"model_name: {model_name}, endpoint_count: {len(model_url_list)}")
     if "gpt" in model_name:
         payload_dict = {
             "model": model_name,
@@ -85,7 +87,6 @@ def call_llm(prompt, temperature, model_url_list, model_name):
         response = result.json()["choices"][0]["message"]["content"]
     else:
         model_url = random.choice(model_url_list)
-        print(f"model_url: {model_url}")
         llm = OpenAI(base_url=f"{model_url}", api_key="EMPTY")
         completion = llm.chat.completions.create(
             model=f"{model_name}",
@@ -698,7 +699,7 @@ def get_evaluation(eval_data, model_url_list, model_name, dataset_name, infer_na
                     print(f"Error occurred for prompt at index {idx}: {exc}")
                     print(f)
                     eval_content_list[idx] = "Error"
-                    scores[idx] = 0
+                    scores[idx] = None
     return eval_content_list, scores
 
 if __name__ == "__main__":
@@ -752,7 +753,9 @@ if __name__ == "__main__":
 
         for line in tmp:
             try:
-                eval_data.append(json.loads(line))
+                item = json.loads(line)
+                if item.get("status", "ok") == "ok" and item.get("generated_output"):
+                    eval_data.append(item)
             except Exception as e:
                 print(line)
                 print(f"{e}")
@@ -797,5 +800,4 @@ if __name__ == "__main__":
         with open(save_eval_path, "w") as f:
             json.dump(existing_eval_data, f, ensure_ascii=False, indent=4)
     except Exception as e:
-        print(f"Error occurred during evaluation: {e}")
-        # continue
+        raise RuntimeError(f"Error occurred during evaluation: {e}") from e

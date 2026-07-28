@@ -8,11 +8,11 @@ import traceback
 
 from methods.mas_base import MAS
 from methods import get_method_class
+from methods.utils import ProtocolParseError
+from config_utils import load_config
 
 def load_model_api_config(model_api_config):
-    with open(model_api_config, "r") as f:
-        model_api_config = json.load(f)
-    model_api_config = model_api_config["model_dict"]
+    model_api_config = load_config(model_api_config)["model_dict"]
     for model_name in model_api_config:
         actural_max_workers = model_api_config[model_name]["max_workers_per_model"] * len(model_api_config[model_name]["model_list"])
         model_api_config[model_name]["max_workers"] = actural_max_workers
@@ -35,10 +35,32 @@ def process_sample(args, general_config, sample, output_path, lock):
     try:
         response = mas.inference(query)
         save_data["generated_output"] = response
+        protocol_failures = [
+            call for call in mas.get_call_history()
+            if call.get("protocol_status") != "ok"
+        ]
+        if any(call.get("protocol_status") == "token_truncation" for call in protocol_failures):
+            save_data["status"] = "token_truncation"
+        else:
+            save_data["status"] = "protocol_failure" if protocol_failures else "ok"
+    except ProtocolParseError as e:
+        call_history = mas.get_call_history()
+        if any(call.get("protocol_status") == "token_truncation" for call in call_history):
+            save_data["status"] = "token_truncation"
+        else:
+            save_data["status"] = "protocol_failure"
+        save_data["error_type"] = type(e).__name__
+        save_data["error"] = str(e)
+        save_data["traceback"] = traceback.format_exc()
     except Exception as e:
-        save_data["error"] = f"Inference Error: {traceback.format_exc()}"
+        save_data["status"] = "runtime_failure"
+        save_data["error_type"] = type(e).__name__
+        save_data["error"] = str(e)
+        save_data["traceback"] = traceback.format_exc()
     save_data.update({"token_stats": mas.get_token_stats()})
+    save_data.update({"call_history": mas.get_call_history()})
     write_to_jsonl(lock, output_path, save_data)
+    return save_data["status"] == "ok"
 
 def reserve_unprocessed(output_json, test_dataset):
     processed_queries = set()
@@ -46,7 +68,8 @@ def reserve_unprocessed(output_json, test_dataset):
         with open(output_json, "r") as f:
             for line in f:
                 infered_sample = json.loads(line)
-                processed_queries.add(infered_sample["query"])
+                if infered_sample.get("status") == "ok" and infered_sample.get("generated_output"):
+                    processed_queries.add(infered_sample["query"])
 
     test_dataset = [sample for sample in test_dataset if sample["query"] not in processed_queries]
     return test_dataset
@@ -79,8 +102,10 @@ if __name__ == "__main__":
     # Load model config
     model_api_config = load_model_api_config(args.model_api_config)
     general_config.update({"model_api_config": model_api_config})
-    print("-"*50, f"\n>> Model API config: {general_config['model_api_config']}")
-    print("-"*50, f"\n>> Model API config for X-MAS: {model_api_config[args.model_name]}")
+    if args.model_name not in model_api_config:
+        raise ValueError(f"Model alias {args.model_name!r} is not present in {args.model_api_config}")
+    endpoint_count = len(model_api_config[args.model_name]["model_list"])
+    print(f">> Loaded model alias {args.model_name!r} with {endpoint_count} endpoint(s); credentials are hidden")
     
     if args.debug:
         # MAS inference
@@ -105,7 +130,9 @@ if __name__ == "__main__":
         
         # get output path
         output_path = args.output_path if args.output_path is not None else f"./X-MAS-Design/results/{args.test_dataset_name}/{args.method_name}_manual_4m_infer.jsonl"
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        output_dir = os.path.dirname(output_path)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
         
         # reserve unprocessed samples
         if args.test_dataset_name == "SciKnowEval":
@@ -117,12 +144,16 @@ if __name__ == "__main__":
         print(f">> After filtering: {len(test_dataset)} samples")
         
         lock = threading.Lock()
+        results = []
         # inference the mas
         if args.sequential:
             for sample in test_dataset:
-                process_sample(args, general_config, sample, output_path)
+                results.append(process_sample(args, general_config, sample, output_path, lock))
         else:
             max_workers = model_api_config[args.model_name]["max_workers"]
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                for _ in tqdm(executor.map(lambda sample: process_sample(args, general_config, sample, output_path, lock), test_dataset), total=len(test_dataset), desc=f"Processing queries with {args.method_name} on {args.test_dataset_name}"):
-                    pass
+                results = list(tqdm(executor.map(lambda sample: process_sample(args, general_config, sample, output_path, lock), test_dataset), total=len(test_dataset), desc=f"Processing queries with {args.method_name} on {args.test_dataset_name}"))
+        failures = len(results) - sum(results)
+        print(json.dumps({"status": "complete", "processed": len(results), "failures": failures, "output": output_path}, indent=2))
+        if failures:
+            raise SystemExit(1)

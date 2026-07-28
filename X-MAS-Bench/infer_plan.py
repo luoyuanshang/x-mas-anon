@@ -61,22 +61,22 @@ def extract_roles(response: str):
     return role_descriptions
 
 def plan_init_answers(query):
+    prompt = '''You are given a [Question]. Provide an ordered role plan containing the agents required to solve it. Every role must use exactly this format:
+###ROLE START: <role description> ROLE END###
 
-    str = "You are given a [Question]. Your task is to provide a suitable role plan to the question by giving the role descriptions of the agents required to solve this problem in the order of workflow in a fixed format which starts with "###ROLE START:" and ends with "ROLE END###\n"". Determine the number of agents and content of role descriptions in role plan based on the question. One example for the role plan format is as follows:\n\n"
+Example:
+###ROLE START: You are an algorithm developer who proposes a workable algorithm. ROLE END###
+###ROLE START: You are a mathematics expert who checks the calculations. ROLE END###
+###ROLE START: You are a final-answer editor who verifies and states the answer. ROLE END###
 
-    str += "-----\n###ROLE START: You are an algorithm developer. You are good at developing and utilizing algorithms to solve problems.Your task is to come up with a workable algorithm based on the problem to solve it.ROLE END###\n###ROLE START: You are a Mathematics Expert skilled in solving complex equations, mathematical modeling, and logical problem-solving. Given the problem and the algorithm in teh previews response, provide detailed calculations, step-by-step reasoning, and a precise mathematical solution using advanced mathematical concepts where necessary.ROLE END###\n###ROLE START: You are a experienced math-problem solver. You are good at solve math problem, reflect previews solutions and summarize the final answers to math problems.Your task is to reflect and give the final answer to teh question.And be sure to restate the final answer at the end.ROLE END###\n"
-
-    str += "The question is as follows:\n\n"
-
-    str += f"-----\n# [Question]:\n {query}\n\n"
-
-    str += "-----\n\nNow, given the question, provide a role plan to the question directly."
-    return str
+Question:
+'''
+    return prompt + query + "\n\nReturn only the role blocks."
 
 
 def get_sample_pool(test_dataset_name):              
     sample_pool = []
-    with open(f"X-MAS-Bench/results/{test_dataset_name}/qwen2.5-32b-instruct/direct/qwen2.5-32b-instruct_direct.jsonl", "r") as f:
+    with open(f"X-MAS-Bench/results/{test_dataset_name}/{args.model_name}_direct.jsonl", "r") as f:
         for i, line in enumerate(f):
             sample = json.loads(line)
             query = sample["query"]
@@ -159,7 +159,7 @@ def process_sample(sample, plan_model_names):
             init_query = sample["query"]
             for i,id in enumerate(model_id_list):
                 print(f"plan_query_{i}_model:", plan_model_names[id])
-                plan_model_list = model_dict[plan_model_names[id]]
+                plan_model_list = model_dict[plan_model_names[id]]["model_list"]
                 plan_llm = LLM(general_config, plan_model_list)
                 if i == 0 :
                     plan_query = role_descriptions[0] + f"\nThe question is : {init_query}"
@@ -240,4 +240,5 @@ try:
             for _ in tqdm(executor.map(lambda x: process_sample(*x), args_for_execution), total=len(sample_pool), desc=f"Processing plan queries with {args.model_name} on {test_dataset_name}"):
                 pass
 except Exception as e:
-    print(f"plan Traceback: {traceback.format_exc()}")
+    print(f"plan Traceback: {traceback.format_exc()}", file=sys.stderr)
+    raise
