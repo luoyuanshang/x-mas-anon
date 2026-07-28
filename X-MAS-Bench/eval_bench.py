@@ -669,7 +669,7 @@ def get_evaluation(eval_data, model_url_list, model_name, dataset_name, infer_na
     """
     # print(eval_data)
     if "evaluate" in infer_name:
-        source_dir = f"./X-MAS-Bench/results/{dataset_name}/qwen2.5-32b-instruct_direct_eval.json"
+        source_dir = f"./X-MAS-Bench/results/{dataset_name}/qwen-2.5-32b-instruct_direct_eval.json"
         source_map = load_source_data(source_dir)
     else:
         source_map = {}
@@ -697,7 +697,7 @@ def get_evaluation(eval_data, model_url_list, model_name, dataset_name, infer_na
                     scores[idx] = score
                 except Exception as exc:
                     print(f"Error occurred for prompt at index {idx}: {exc}")
-                    print(f)
+                    print(f"Error while evaluating item {idx}: {exc}")
                     eval_content_list[idx] = "Error"
                     scores[idx] = None
     return eval_content_list, scores
