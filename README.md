@@ -82,6 +82,20 @@ python X-MAS-Design/inference_mas.py \
 
 The original X-MAS-Bench result archive is available from the anonymous Google Drive link supplied with the submission: <https://drive.google.com/file/d/1oukYZLDOuc98i-ICkoZ6OYME9a7-AuH1/view?usp=drive_link>. Place extracted result/dataset folders under the paths expected by the original scripts. The paper's Appendix E specifies the role-to-model configurations for the heterogeneous MAS settings; the YAML/JSON configuration format here provides the corresponding runnable model-alias and endpoint path.
 
+## Dataset provenance and access
+
+The benchmark files are sampled or reformatted third-party evaluation data and remain subject to their upstream licenses and access terms. [DATASETS.md](DATASETS.md) lists the upstream source, paper citation, upstream license/access status, local file, and preparation performed for each of the 23 dataset configurations.
+
+GPQA and GPQA-Diamond are gated by their data provider and are not redistributed in this repository. After obtaining `gpqa_main.csv` and `gpqa_diamond.csv` through the [official GPQA access page](https://huggingface.co/datasets/Idavidrein/gpqa), create the local benchmark files with:
+
+```bash
+python scripts/prepare_gpqa.py \
+  --main-csv /path/to/gpqa_main.csv \
+  --diamond-csv /path/to/gpqa_diamond.csv
+```
+
+This command writes the two files under `X-MAS-Bench/benchmarks/`; those generated files are ignored by Git.
+
 ## Repository layout
 
 ```text

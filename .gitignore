@@ -4,3 +4,5 @@ __pycache__/
 *.py[cod]
 X-MAS-Bench/results/
 X-MAS-Design/results/
+/X-MAS-Bench/benchmarks/GPQA.json
+/X-MAS-Bench/benchmarks/GPQA-Diamond.json
